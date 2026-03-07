@@ -51,7 +51,7 @@ public class WebhookService : IWebhookService
     public async Task QueueReviewAsync(string payload)
     {
         var webhookPayload = JsonSerializer.Deserialize<GitHubWebhookPayload>(payload);
-        var owner = webhookPayload?.Repository?.Owner?.Login;
+        var owner = webhookPayload?.Repository?.Owner?.Login ;
         var repo = webhookPayload?.Repository?.Name;
         var prNumber = webhookPayload?.PrNumber;
         var prTitle = webhookPayload?.PullRequest?.Title;
