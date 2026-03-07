@@ -71,7 +71,11 @@ public class WebhookService : IWebhookService
         {
             Console.WriteLine($"🤖 Reviewing {file.FileName} ({file.Language})...");
             var review = await _groq.ReviewCodeAsync(file.Language, file.FileName, file.Patch);
-            Console.WriteLine($"✅ Review for {file.FileName}:\n{review}\n");
+            
+            var comment = $"## 🤖 Revix Review: `{file.FileName}`\n\n{review}";
+            await _gitHubService.PostReviewCommentAsync(owner!, repo!, prNumber!.Value, comment, accessToken);
+            
+            Console.WriteLine($"✅ Posted review for {file.FileName}");
         }
     }
 }

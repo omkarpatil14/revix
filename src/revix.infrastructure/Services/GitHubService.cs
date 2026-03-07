@@ -52,4 +52,17 @@ public class GitHubService : IGitHubService
             ".c"    => "C",
             _       => "Unknown"
         };
+
+            public async Task PostReviewCommentAsync(string owner, string repo, int prNumber, string body, string accessToken)
+        {
+            var client = new GitHubClient(new ProductHeaderValue("RevixBot"));
+            client.Credentials = new Credentials(accessToken);
+
+            await client.PullRequest.Review.Create(owner, repo, prNumber,
+                new PullRequestReviewCreate
+                {
+                    Body = body,
+                    Event = PullRequestReviewEvent.Comment
+                });
+        }
 }
