@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Configuration;
 using System.IO;
+using System.Reflection;
 
 namespace Revix.Infrastructure;
 
@@ -15,13 +16,11 @@ public class RevixDbContextFactory : IDesignTimeDbContextFactory<RevixDbContext>
             .SetBasePath(Path.Combine(basePath, "../revix.API"))
             .AddJsonFile("appsettings.json", optional: false)
             .AddEnvironmentVariables()
+            .AddUserSecrets(Assembly.Load("revix.API"))
             .Build();
 
         var optionsBuilder = new DbContextOptionsBuilder<RevixDbContext>();
-
-        optionsBuilder.UseNpgsql(
-            configuration.GetConnectionString("DefaultConnection")
-        );
+        optionsBuilder.UseNpgsql(configuration.GetConnectionString("DefaultConnection"));
 
         return new RevixDbContext(optionsBuilder.Options);
     }

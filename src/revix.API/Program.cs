@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OAuth;
 using System.Security.Claims;
 using System.Text.Json;
+using Revix.Core.Interfaces;
+using Revix.Infrastructure.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -66,22 +68,29 @@ builder.Services.AddAuthentication(options =>
             var response = await context.Backchannel.SendAsync(request);
             response.EnsureSuccessStatusCode();
 
-            var user = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var userJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
-            context.Identity!.AddClaim(new Claim(
-                ClaimTypes.NameIdentifier,
-                user.RootElement.GetProperty("id").GetInt64().ToString()
-            ));
+            var githubId = userJson.RootElement.GetProperty("id").GetInt64().ToString();
+            var username = userJson.RootElement.GetProperty("login").GetString()!;
 
-            context.Identity.AddClaim(new Claim(
-                ClaimTypes.Name,
-                user.RootElement.GetProperty("login").GetString()!
-            ));
+            context.Identity!.AddClaim(new Claim(ClaimTypes.NameIdentifier, githubId));
+            context.Identity.AddClaim(new Claim(ClaimTypes.Name, username));
+
+            
+            var authService = context.HttpContext.RequestServices
+                                    .GetRequiredService<IGitHubAuthService>();
+
+            await authService.HandleGitHubLoginAsync(githubId, username, context.AccessToken!);
         }
     };
 });
 
 builder.Services.AddAuthorization();
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+});
 
 // =======================
 // COOKIE POLICY
@@ -94,12 +103,17 @@ builder.Services.Configure<CookiePolicyOptions>(options =>
     options.CheckConsentNeeded   = _ => false;
 });
 
+builder.Services.AddDataProtection();
+builder.Services.AddScoped<ITokenEncryptionService, TokenEncryptionService>();
+builder.Services.AddScoped<IGitHubAuthService, GitHubAuthService>();
+builder.Services.AddScoped<IWebhookService, WebhookService>();
+
 // =======================
 // PIPELINE
 // =======================
 
 var app = builder.Build();
-
+app.UseForwardedHeaders();
 app.UseCookiePolicy();
 app.UseAuthentication();
 app.UseAuthorization();
