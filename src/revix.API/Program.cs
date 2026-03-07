@@ -118,9 +118,7 @@ builder.Services.AddScoped<IWebhookService, WebhookService>();
 builder.Services.AddScoped<IGitHubService, GitHubService>();
 builder.Services.AddScoped<ICommentService, CommentService>();
 
-// =======================
-// PIPELINE
-// =======================
+
 
 var app = builder.Build();
 app.UseForwardedHeaders();

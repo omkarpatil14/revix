@@ -61,7 +61,7 @@ public class WebhookService : IWebhookService
         var user = await _db.Users.FirstOrDefaultAsync(u => u.GitHubUsername == owner);
         if (user == null)
         {
-            Console.WriteLine($"❌ User '{owner}' not found. Skipping PR #{prNumber}.");
+            Console.WriteLine($"❌ User '{owner}' not found. Skipping PR {prNumber}.");
             return;
         }
 
