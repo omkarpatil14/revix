@@ -6,6 +6,8 @@ using System.Security.Claims;
 using System.Text.Json;
 using Revix.Core.Interfaces;
 using Revix.Infrastructure.Services;
+using Polly;
+using Polly.Extensions.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -91,6 +93,12 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
 });
+
+builder.Services.AddHttpClient<IGroqService, GroqService>()
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt =>
+            TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
 // =======================
 // COOKIE POLICY
