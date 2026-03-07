@@ -1,13 +1,14 @@
 using Octokit;
-using Revix.core.Interfaces;
+using Revix.Core.Interfaces;
 
-namespace Revix.infrastructure.Services;
+namespace Revix.Infrastructure.Services;
 
 public class CommentService : ICommentService
 {
-    public async Task PostInLineComment(string owner, string repo, int prNumber, string commitSha, string filename, int position, string comment, string token)
+    public async Task PostInlineCommentAsync(string owner, string repo, int prNumber,
+        string commitSha, string filename, int position, string comment, string token)
     {
-        var client = new GitHubClient(new ProductHeaderValue("RevixBot"));
+        var client = new GitHubClient(new ProductHeaderValue("Revix"));
         client.Credentials = new Credentials(token);
 
         await client.PullRequest.ReviewComment.Create(owner, repo, prNumber,
@@ -19,11 +20,10 @@ public class CommentService : ICommentService
             ));
     }
 
-    public async Task PostSummeryCommentAsync(string owner , string repo, int prNumber , string summery, string token){
-        var client = new GitHubClient(new ProductHeaderValue("RevixBot"));
-        client.Credentials = new Credentials(token);
-
-         var client = new GitHubClient(new ProductHeaderValue("Revix"));
+    public async Task PostSummaryCommentAsync(string owner, string repo, int prNumber,
+        string summary, string token)
+    {
+        var client = new GitHubClient(new ProductHeaderValue("Revix"));
         client.Credentials = new Credentials(token);
 
         var body = $"""

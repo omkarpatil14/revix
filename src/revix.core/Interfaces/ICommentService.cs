@@ -1,8 +1,10 @@
-namespace Revix.core.Intefaces;
+namespace Revix.Core.Interfaces;
 
-public interface ICommmentService
+public interface ICommentService
 {
-    Task PostInLineComment(String owner , String repo, int prNumber, string commitSha, string filename, int position, string comment , string token);
-
-    Task PostSummeryCommentAsync(string owner, string repo, int prNumber, string summery, string token);
+    Task PostInlineCommentAsync(string owner, string repo, int prNumber,
+        string commitSha, string filename, int position, string comment, string token);
+    
+    Task PostSummaryCommentAsync(string owner, string repo, int prNumber,
+        string summary, string token);
 }
