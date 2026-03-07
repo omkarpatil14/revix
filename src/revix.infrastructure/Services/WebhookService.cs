@@ -13,18 +13,22 @@ public class WebhookService : IWebhookService
     private readonly string _secret;
     private readonly IGitHubService _gitHubService;        
     private readonly ITokenEncryptionService _encryption;  
-    private readonly RevixDbContext _db;                   
+    private readonly RevixDbContext _db;
+    private readonly IGroqService _groq;                   
 
     public WebhookService(
         IConfiguration config,
         IGitHubService gitHubService,
         ITokenEncryptionService encryption,
-        RevixDbContext db)
+        RevixDbContext db,
+        IGroqService groq
+        )
     {
         _secret = config["GitHub:WebhookSecret"]!;
         _gitHubService = gitHubService;
         _encryption = encryption;
         _db = db;
+        _groq = groq;
     }
 
     public bool ValidateSignature(string payload, string signature)
@@ -59,13 +63,15 @@ public class WebhookService : IWebhookService
             return;
         }
 
-        var accessToken = _encryption.Decrypt(user.EncryptedAccessToken);
-        var files = await _gitHubService.GetPrFilesAsync(owner!, repo!, prNumber!.Value, accessToken);
+       var accessToken = _encryption.Decrypt(user.EncryptedAccessToken);
+       var files = await _gitHubService.GetPrFilesAsync(owner!, repo!, prNumber!.Value, accessToken);
 
-        Console.WriteLine($"📄 PR #{prNumber} has {files.Count} changed files.");
+
         foreach (var file in files)
         {
-            Console.WriteLine($"   - {file.FileName} ({file.Language})");
+            Console.WriteLine($"🤖 Reviewing {file.FileName} ({file.Language})...");
+            var review = await _groq.ReviewCodeAsync(file.Language, file.FileName, file.Patch);
+            Console.WriteLine($"✅ Review for {file.FileName}:\n{review}\n");
         }
     }
 }

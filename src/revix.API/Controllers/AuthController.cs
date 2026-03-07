@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
+using Revix.Core.Interfaces;
 
 [ApiController]
 [Route("auth")]
@@ -46,4 +47,6 @@ public class AuthController : ControllerBase
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Ok("Logged out");
     }
+
+
 }
