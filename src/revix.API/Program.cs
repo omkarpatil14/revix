@@ -116,10 +116,9 @@ builder.Services.AddScoped<ITokenEncryptionService, TokenEncryptionService>();
 builder.Services.AddScoped<IGitHubAuthService, GitHubAuthService>();
 builder.Services.AddScoped<IWebhookService, WebhookService>();
 builder.Services.AddScoped<IGitHubService, GitHubService>();
+builder.Services.AddScoped<ICommentService, CommentService>();
 
-// =======================
-// PIPELINE
-// =======================
+
 
 var app = builder.Build();
 app.UseForwardedHeaders();
