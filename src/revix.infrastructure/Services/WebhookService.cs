@@ -118,6 +118,35 @@ public class WebhookService : IWebhookService
         var summary = string.Join("\n\n---\n\n", allReviews);
         await _commentService.PostSummaryCommentAsync(owner!, repo!, prNumber!.Value, summary, accessToken);
 
+
+        var commitSha = webhookPayload?.PullRequest?.Head?.Sha;
+
+        foreach (var file in files)
+        {
+            Console.WriteLine($"🤖 Reviewing {file.FileName}...");
+            var reviewText = await _groq.ReviewCodeAsync(file.Language, file.FileName, file.Patch);
+            allReviews.Add($"**{file.FileName}**\n{reviewText}");
+
+            var reviewComment = new Revix.Core.Entities.ReviewComment
+            {
+                Id = Guid.NewGuid(),
+                ReviewId = review.Id,
+                FileName = file.FileName,
+                LineNumber = 0,
+                Comment = reviewText,
+                Severity = ExtractSeverity(reviewText),
+                CreatedAt = DateTime.UtcNow
+            };
+            await _db.ReviewComments.AddAsync(reviewComment);
+            totalComments++;
+
+           
+            await _commentService.PostInlineCommentAsync(
+                owner!, repo!, prNumber!.Value,
+                commitSha!, file.FileName, 1,
+                reviewText, accessToken);
+        }
+
         review.CommentsPosted = totalComments;
         await _db.SaveChangesAsync();
 
