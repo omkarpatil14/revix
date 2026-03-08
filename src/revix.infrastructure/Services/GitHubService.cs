@@ -53,7 +53,7 @@ public class GitHubService : IGitHubService
             _       => "Unknown"
         };
 
-            public async Task PostReviewCommentAsync(string owner, string repo, int prNumber, string body, string accessToken)
+        public async Task PostReviewCommentAsync(string owner, string repo, int prNumber, string body, string accessToken)
         {
             var client = new GitHubClient(new ProductHeaderValue("RevixBot"));
             client.Credentials = new Credentials(accessToken);
@@ -64,5 +64,12 @@ public class GitHubService : IGitHubService
                     Body = body,
                     Event = PullRequestReviewEvent.Comment
                 });
+        }
+
+        private int GetLastPosition(string patch)
+        {
+            if (string.IsNullOrEmpty(patch)) return 1;
+            var lines = patch.Split('\n');
+            return lines.Length;
         }
 }
