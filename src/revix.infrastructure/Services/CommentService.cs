@@ -8,7 +8,7 @@ public class CommentService : ICommentService
     public async Task PostInlineCommentAsync(string owner, string repo, int prNumber,
         string commitSha, string filename, int position, string comment, string token)
     {
-        var client = new GitHubClient(new ProductHeaderValue("RevixBot"));
+        var client = new GitHubClient(new ProductHeaderValue("RevixBot") );
         client.Credentials = new Credentials(token);
 
         await client.PullRequest.ReviewComment.Create(owner, repo, prNumber,
