@@ -51,20 +51,20 @@ public class WebhookService : IWebhookService
     public async Task QueueReviewAsync(string payload)
     {
         var webhookPayload = JsonSerializer.Deserialize<GitHubWebhookPayload>(payload);
-        var owner = webhookPayload?.Repository?.Owner?.Login ;
+        var action = webhookPayload?.Action;
+        var owner = webhookPayload?.Repository?.Owner?.Login;
         var repo = webhookPayload?.Repository?.Name;
         var prNumber = webhookPayload?.PrNumber;
         var prTitle = webhookPayload?.PullRequest?.Title;
-        var action = webhookPayload?.Action;
-
-
-        Console.WriteLine($"🔍 Fetching files for PR #{prNumber} - '{prTitle}'");
+        var commitSha = webhookPayload?.PullRequest?.Head?.Sha;
 
         if (action != "opened" && action != "synchronize")
         {
             Console.WriteLine($"⏭️ Skipping action '{action}'");
             return;
         }
+
+        Console.WriteLine($"🔍 Fetching files for PR #{prNumber} - '{prTitle}'");
 
         var user = await _db.Users.FirstOrDefaultAsync(u => u.GitHubUsername == owner);
         if (user == null)
@@ -106,7 +106,7 @@ public class WebhookService : IWebhookService
             var reviewText = await _groq.ReviewCodeAsync(file.Language, file.FileName, file.Patch);
             allReviews.Add($"**{file.FileName}**\n{reviewText}");
 
-            var reviewComment = new Revix.Core.Entities.ReviewComment
+            await _db.ReviewComments.AddAsync(new Revix.Core.Entities.ReviewComment
             {
                 Id = Guid.NewGuid(),
                 ReviewId = review.Id,
@@ -115,45 +115,17 @@ public class WebhookService : IWebhookService
                 Comment = reviewText,
                 Severity = ExtractSeverity(reviewText),
                 CreatedAt = DateTime.UtcNow
-            };
-            await _db.ReviewComments.AddAsync(reviewComment);
+            });
             totalComments++;
 
-            var comment = $"## 🤖 Revix Review: `{file.FileName}`\n\n{reviewText}";
-            await _gitHubService.PostReviewCommentAsync(owner!, repo!, prNumber!.Value, comment, accessToken);
-        }
-
-        var summary = string.Join("\n\n---\n\n", allReviews);
-        await _commentService.PostSummaryCommentAsync(owner!, repo!, prNumber!.Value, summary, accessToken);
-
-
-        var commitSha = webhookPayload?.PullRequest?.Head?.Sha;
-
-        foreach (var file in files)
-        {
-            Console.WriteLine($"🤖 Reviewing {file.FileName}...");
-            var reviewText = await _groq.ReviewCodeAsync(file.Language, file.FileName, file.Patch);
-            allReviews.Add($"**{file.FileName}**\n{reviewText}");
-
-            var reviewComment = new Revix.Core.Entities.ReviewComment
-            {
-                Id = Guid.NewGuid(),
-                ReviewId = review.Id,
-                FileName = file.FileName,
-                LineNumber = 0,
-                Comment = reviewText,
-                Severity = ExtractSeverity(reviewText),
-                CreatedAt = DateTime.UtcNow
-            };
-            await _db.ReviewComments.AddAsync(reviewComment);
-            totalComments++;
-
-           
             await _commentService.PostInlineCommentAsync(
                 owner!, repo!, prNumber!.Value,
                 commitSha!, file.FileName, 1,
                 reviewText, accessToken);
         }
+
+        var summary = string.Join("\n\n---\n\n", allReviews);
+        await _commentService.PostSummaryCommentAsync(owner!, repo!, prNumber!.Value, summary, accessToken);
 
         review.CommentsPosted = totalComments;
         await _db.SaveChangesAsync();
