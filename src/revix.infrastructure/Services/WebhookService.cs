@@ -55,8 +55,16 @@ public class WebhookService : IWebhookService
         var repo = webhookPayload?.Repository?.Name;
         var prNumber = webhookPayload?.PrNumber;
         var prTitle = webhookPayload?.PullRequest?.Title;
+        var action = webhookPayload?.Action;
+
 
         Console.WriteLine($"🔍 Fetching files for PR #{prNumber} - '{prTitle}'");
+
+        if (action != "opened" && action != "synchronize")
+        {
+            Console.WriteLine($"⏭️ Skipping action '{action}'");
+            return;
+        }
 
         var user = await _db.Users.FirstOrDefaultAsync(u => u.GitHubUsername == owner);
         if (user == null)
