@@ -45,7 +45,7 @@ public class GitHubService : IGitHubService
             ".ts"   => "TypeScript",
             ".py"   => "Python",
             ".java" => "Java",
-            ".go"   => "Go",
+            ".go"   => "G",
             ".rb"   => "Ruby",
             ".php"  => "PHP",
             ".cpp"  => "C++",
