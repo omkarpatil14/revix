@@ -8,7 +8,7 @@ using Revix.Core.Interfaces;
 using Revix.Infrastructure.Services;
 using Polly;
 using Polly.Extensions.Http;
-using StackExchange.Redis; 
+using StackExchange.Redis;
 using Revix.Core.Constants;
 using Revix.Worker;
 using Microsoft.AspNetCore.DataProtection;
@@ -27,6 +27,36 @@ builder.Services.AddDbContext<RevixDbContext>(options =>
     ));
 
 // =======================
+// CORS
+// =======================
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Frontend", policy =>
+    {
+        policy
+            .WithOrigins(
+                builder.Configuration["App:FrontendUrl"] ?? "http://localhost:5173"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
+// =======================
+// FORWARDED HEADERS (trust ngrok proxy)
+// =======================
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+                             | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+// =======================
 // AUTHENTICATION
 // =======================
 
@@ -36,15 +66,20 @@ builder.Services.AddAuthentication(options =>
 })
 .AddCookie(options =>
 {
-    options.Cookie.Name = "Revix.Auth";
-    options.Cookie.HttpOnly = true;
-    options.Cookie.IsEssential = true;
-    options.Cookie.SameSite = SameSiteMode.Lax;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.Name         = "Revix.Auth";
+    options.Cookie.HttpOnly     = true;
+    options.Cookie.IsEssential  = true;
+    options.Cookie.SameSite     = SameSiteMode.None;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    options.Events.OnRedirectToLogin = context =>
+    {
+        context.Response.StatusCode = 401;
+        return Task.CompletedTask;
+    };
 })
 .AddOAuth("GitHub", options =>
 {
-    options.ClientId = builder.Configuration["GitHub:ClientId"]!;
+    options.ClientId     = builder.Configuration["GitHub:ClientId"]!;
     options.ClientSecret = builder.Configuration["GitHub:ClientSecret"]!;
     options.CallbackPath = "/auth/callback";
 
@@ -54,14 +89,15 @@ builder.Services.AddAuthentication(options =>
 
     options.Scope.Add("read:user");
     options.Scope.Add("repo");
+    options.Scope.Add("admin:repo_hook");
 
     options.SaveTokens = true;
 
     options.CorrelationCookie.Name         = ".Revix.OAuth.Correlation";
     options.CorrelationCookie.HttpOnly     = true;
     options.CorrelationCookie.IsEssential  = true;
-    options.CorrelationCookie.SameSite     = SameSiteMode.Lax;
-    options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.CorrelationCookie.SameSite     = SameSiteMode.None;
+    options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
 
     options.Events = new OAuthEvents
     {
@@ -76,13 +112,16 @@ builder.Services.AddAuthentication(options =>
 
             var userJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
-            var githubId = userJson.RootElement.GetProperty("id").GetInt64().ToString();
-            var username = userJson.RootElement.GetProperty("login").GetString()!;
+            var githubId   = userJson.RootElement.GetProperty("id").GetInt64().ToString();
+            var username   = userJson.RootElement.GetProperty("login").GetString()!;
+            var avatarUrl  = userJson.RootElement.GetProperty("avatar_url").GetString()!;
+            var profileUrl = userJson.RootElement.GetProperty("html_url").GetString()!;
 
+            context.Identity!.AddClaim(new Claim("avatar_url",  avatarUrl));
+            context.Identity!.AddClaim(new Claim("profile_url", profileUrl));
             context.Identity!.AddClaim(new Claim(ClaimTypes.NameIdentifier, githubId));
             context.Identity.AddClaim(new Claim(ClaimTypes.Name, username));
 
-            
             var authService = context.HttpContext.RequestServices
                                     .GetRequiredService<IGitHubAuthService>();
 
@@ -92,11 +131,6 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddAuthorization();
-
-builder.Services.Configure<ForwardedHeadersOptions>(options =>
-{
-    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
-});
 
 builder.Services.AddHttpClient<IGroqService, GroqService>()
     .AddPolicyHandler(HttpPolicyExtensions
@@ -110,11 +144,14 @@ builder.Services.AddHttpClient<IGroqService, GroqService>()
 
 builder.Services.Configure<CookiePolicyOptions>(options =>
 {
-    options.MinimumSameSitePolicy = SameSiteMode.Lax;
-    options.Secure               = CookieSecurePolicy.Always;
+    options.MinimumSameSitePolicy = SameSiteMode.None;
+    options.Secure               = CookieSecurePolicy.SameAsRequest;
     options.CheckConsentNeeded   = _ => false;
 });
 
+// =======================
+// OTHER SERVICES
+// =======================
 
 builder.Services.AddScoped<ITokenEncryptionService, TokenEncryptionService>();
 builder.Services.AddScoped<IGitHubAuthService, GitHubAuthService>();
@@ -131,9 +168,13 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(
         Path.Combine(builder.Environment.ContentRootPath, "DataProtection-Keys")));
 
-
+// =======================
+// BUILD
+// =======================
 
 var app = builder.Build();
+
+app.UseCors("Frontend");
 app.UseForwardedHeaders();
 app.UseCookiePolicy();
 app.UseAuthentication();
@@ -141,19 +182,25 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// =======================
+// REDIS CONSUMER GROUP
+// =======================
+
 var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
-var db = redis.GetDatabase();
+var redisDb = redis.GetDatabase();
 try
 {
-    await db.StreamCreateConsumerGroupAsync(
+    await redisDb.StreamCreateConsumerGroupAsync(
         StreamNames.Reviews,
         StreamNames.ConsumerGroup,
         StreamPosition.NewMessages,
-        createStream: true);   // creates the stream key if it doesn't exist yet
+        createStream: true);
+
+    Console.WriteLine("✅ Redis consumer group created.");
 }
 catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
 {
-    System.Console.WriteLine("Consumer group already exists, skipping creation.");
+    Console.WriteLine("ℹ️ Consumer group already exists, skipping creation.");
 }
 
 app.Run();

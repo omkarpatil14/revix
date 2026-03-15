@@ -9,29 +9,40 @@ using Revix.Core.Interfaces;
 [Route("auth")]
 public class AuthController : ControllerBase
 {
+     private readonly IConfiguration _config;
+
+    public AuthController(IConfiguration config)
+    {
+        _config = config;
+    }
+
     [HttpGet("login")]
     public IActionResult Login()
     {
+        var frontendUrl = _config["App:FrontendUrl"]!;
         var properties = new AuthenticationProperties
         {
-            RedirectUri = "/auth/me"
+            RedirectUri = $"{frontendUrl}/dashboard"
         };
-
         return Challenge(properties, "GitHub");
     }
-
+    
     [HttpGet("me")]
     [Authorize]
     public IActionResult Me()
     {
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var username = User.FindFirst(ClaimTypes.Name)?.Value;
+        var  avatarUrl = User.FindFirst("avatar_url")?.Value;
+        var profileUrl = User.FindFirst("profile_url")?.Value;
 
         return Ok(new
         {
             Message = "Login Successful",
             GitHubId = userId,
-            Username = username
+            Username = username,
+            AvatarUrl  = avatarUrl,
+            ProfileUrl = profileUrl
         });
     }
 

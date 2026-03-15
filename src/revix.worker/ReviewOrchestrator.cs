@@ -33,7 +33,7 @@ public class ReviewOrchestrator
 
     public async Task ProcessReviewAsync(ReviewJob job)
     {
-        // 1. Load repository + user, decrypt token
+        
         var repoGuid = Guid.Parse(job.RepoDbId);
 
         var repository = await _db.Repositories
@@ -48,7 +48,7 @@ public class ReviewOrchestrator
 
         var accessToken = _encryption.Decrypt(repository.User.EncryptedAccessToken);
 
-        // 2. Fetch changed files
+    
         var files = await _github.GetPrFilesAsync(
             job.Owner, job.Repo, job.PrNumber, accessToken);
 
@@ -58,7 +58,7 @@ public class ReviewOrchestrator
             return;
         }
 
-        // 3. Create Review record
+        
         var review = new Revix.Core.Entities.Review
         {
             Id             = Guid.NewGuid(),
@@ -75,7 +75,7 @@ public class ReviewOrchestrator
         var allReviews    = new List<string>();
         int totalComments = 0;
 
-        // 4. Review each file — post inline comment + collect for summary
+       
         foreach (var file in files)
         {
             _logger.LogInformation("Reviewing {FileName}...", file.FileName);
@@ -97,7 +97,7 @@ public class ReviewOrchestrator
             });
             totalComments++;
 
-            // Post inline comment at the last changed line in the diff
+           
             try
             {
                 await _comments.PostInlineCommentAsync(
@@ -111,19 +111,19 @@ public class ReviewOrchestrator
             }
             catch (Exception ex)
             {
-                // Inline comment failed — log and continue, summary will still be posted
+               
                 _logger.LogWarning(ex,
                     "Inline comment failed for {FileName}. Will appear in summary only.",
                     file.FileName);
             }
         }
 
-        // 5. Post summary comment with all file reviews
+       
         var summary = string.Join("\n\n---\n\n", allReviews);
         await _comments.PostSummaryCommentAsync(
             job.Owner, job.Repo, job.PrNumber, summary, accessToken);
 
-        // 6. Persist everything
+
         review.CommentsPosted = totalComments;
         await _db.SaveChangesAsync();
 
@@ -132,11 +132,6 @@ public class ReviewOrchestrator
             job.PrNumber, job.PrTitle, totalComments);
     }
 
-    /// <summary>
-    /// Returns the position of the last added line (+) in the diff patch.
-    /// GitHub inline comments require a position within the diff, not the file.
-    /// Position counts every line including hunk headers (@@ lines).
-    /// </summary>
     private static int GetLastDiffPosition(string patch)
     {
         if (string.IsNullOrWhiteSpace(patch)) return 1;
@@ -148,7 +143,6 @@ public class ReviewOrchestrator
         foreach (var line in lines)
         {
             position++;
-            // Count added lines only — these are valid comment targets
             if (line.StartsWith('+') && !line.StartsWith("+++"))
                 lastAddedLine = position;
         }

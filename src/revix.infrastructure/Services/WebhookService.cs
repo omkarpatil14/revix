@@ -56,7 +56,7 @@ public class WebhookService : IWebhookService
 
     public async Task QueueReviewAsync(string payload)
     {
-        // ── 1. Deserialize ────────────────────────────────────────────────────
+      
         GitHubWebhookPayload? webhookPayload;
         try
         {
@@ -65,10 +65,10 @@ public class WebhookService : IWebhookService
         catch (JsonException ex)
         {
             _logger.LogError(ex, "Failed to deserialize webhook payload.");
-            return; // malformed JSON — nothing we can do
+            return; 
         }
 
-        // ── 2. Extract & validate required fields ─────────────────────────────
+        
         var action    = webhookPayload?.Action;
         var owner     = webhookPayload?.Repository?.Owner?.Login;
         var repo      = webhookPayload?.Repository?.Name;
@@ -94,7 +94,7 @@ public class WebhookService : IWebhookService
             return;
         }
 
-        // ── 3. Look up user ───────────────────────────────────────────────────
+        
         var user = await _db.Users
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.GitHubUsername == owner);
@@ -107,7 +107,7 @@ public class WebhookService : IWebhookService
             return;
         }
 
-        // ── 4. Look up repository ─────────────────────────────────────────────
+        
         var repository = await _db.Repositories
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.UserId == user.Id && r.RepoName == repo);
@@ -120,7 +120,7 @@ public class WebhookService : IWebhookService
             return;
         }
 
-        // ── 5. Enqueue — fast return, worker does the rest ────────────────────
+        
         var job = new ReviewJob
         {
             Owner     = owner,
@@ -140,14 +140,13 @@ public class WebhookService : IWebhookService
         }
         catch (Exception ex)
         {
-            // Redis is down or unreachable — log and surface so the caller
-            // can return a 5xx, triggering GitHub's webhook retry.
+           
             _logger.LogError(ex,
                 "Failed to enqueue PR #{PrNumber} ({Owner}/{Repo}). " +
                 "GitHub will retry the webhook automatically.",
                 job.PrNumber, job.Owner, job.Repo);
 
-            throw; // re-throw so the endpoint returns 500 → GitHub retries
+            throw;
         }
     }
 }
