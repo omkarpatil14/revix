@@ -145,6 +145,26 @@ public class GitHubService : IGitHubService
             _       => "Unknown"
         };
 
+        public async Task<string> GetTokenScopesAsync(string accessToken)
+        {
+            using var client = new HttpClient();
+            client.DefaultRequestHeaders.Add("Authorization", $"token {accessToken}");
+            client.DefaultRequestHeaders.Add("User-Agent", "RevixBot");
+
+            var response = await client.GetAsync("https://api.github.com/user");
+            
+            if (!response.IsSuccessStatusCode)
+                return string.Empty;
+
+            // GitHub returns granted scopes in this header
+            response.Headers.TryGetValues("X-OAuth-Scopes", out var values);
+            return values?.FirstOrDefault() ?? string.Empty;
+        }
+
+        public bool HasRepoScope(string scopes) =>
+        scopes.Split(',').Select(s => s.Trim())
+            .Any(s => s == "repo" || s == "write:repo_hook");
+
     private bool IsIgnored(string filename) =>
         filename.EndsWith(".json") ||
         filename.EndsWith(".md")   ||
