@@ -3,38 +3,44 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Revix.Core.Interfaces;
 using Revix.Core.Models;
+using Revix.Infrastructure.Services;
 
 namespace Revix.Infrastructure.Services;
 
 public class WebhookService : IWebhookService
 {
     private readonly string _secret;
-    private readonly IGitHubService _gitHubService;
     private readonly ITokenEncryptionService _encryption;
     private readonly RevixDbContext _db;
-    private readonly IGroqService _groq;
-    private readonly ICommentService _commentService;
+    private readonly ReviewQueue _reviewQueue;
+    private readonly ILogger<WebhookService> _logger;
 
     public WebhookService(
         IConfiguration config,
-        IGitHubService gitHubService,
         ITokenEncryptionService encryption,
         RevixDbContext db,
-        IGroqService groq,
-        ICommentService commentService)
+        ReviewQueue reviewQueue,
+        ILogger<WebhookService> logger)
     {
-        _secret = config["GitHub:WebhookSecret"]!;
-        _gitHubService = gitHubService;
+        _secret = config["GitHub:WebhookSecret"]
+            ?? throw new InvalidOperationException("GitHub:WebhookSecret is not configured.");
         _encryption = encryption;
         _db = db;
-        _groq = groq;
-        _commentService = commentService;
+        _reviewQueue = reviewQueue;
+        _logger = logger;
     }
 
     public bool ValidateSignature(string payload, string signature)
     {
+        if (string.IsNullOrWhiteSpace(payload))
+            throw new ArgumentException("Payload cannot be empty.", nameof(payload));
+
+        if (string.IsNullOrWhiteSpace(signature))
+            throw new ArgumentException("Signature cannot be empty.", nameof(signature));
+
         var keyBytes = Encoding.UTF8.GetBytes(_secret);
         var payloadBytes = Encoding.UTF8.GetBytes(payload);
 
@@ -50,93 +56,97 @@ public class WebhookService : IWebhookService
 
     public async Task QueueReviewAsync(string payload)
     {
-        var webhookPayload = JsonSerializer.Deserialize<GitHubWebhookPayload>(payload);
-        var action = webhookPayload?.Action;
-        var owner = webhookPayload?.Repository?.Owner?.Login;
-        var repo = webhookPayload?.Repository?.Name;
-        var prNumber = webhookPayload?.PrNumber;
-        var prTitle = webhookPayload?.PullRequest?.Title;
+      
+        GitHubWebhookPayload? webhookPayload;
+        try
+        {
+            webhookPayload = JsonSerializer.Deserialize<GitHubWebhookPayload>(payload);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to deserialize webhook payload.");
+            return; 
+        }
+
+        
+        var action    = webhookPayload?.Action;
+        var owner     = webhookPayload?.Repository?.Owner?.Login;
+        var repo      = webhookPayload?.Repository?.Name;
+        var prNumber  = webhookPayload?.PrNumber;
+        var prTitle   = webhookPayload?.PullRequest?.Title ?? $"PR #{webhookPayload?.PrNumber}";
         var commitSha = webhookPayload?.PullRequest?.Head?.Sha;
 
         if (action != "opened" && action != "synchronize")
         {
-            Console.WriteLine($"⏭️ Skipping action '{action}'");
+            _logger.LogInformation("Skipping action '{Action}' — not a review trigger.", action);
             return;
         }
 
-        Console.WriteLine($"🔍 Fetching files for PR #{prNumber} - '{prTitle}'");
+        if (string.IsNullOrWhiteSpace(owner)  ||
+            string.IsNullOrWhiteSpace(repo)   ||
+            prNumber is null                  ||
+            string.IsNullOrWhiteSpace(commitSha))
+        {
+            _logger.LogWarning(
+                "Webhook payload is missing required fields. " +
+                "Owner={Owner}, Repo={Repo}, PR={PrNumber}, SHA={Sha}",
+                owner, repo, prNumber, commitSha);
+            return;
+        }
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.GitHubUsername == owner);
+        
+        var user = await _db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.GitHubUsername == owner);
+
         if (user == null)
         {
-            Console.WriteLine($"❌ User '{owner}' not found. Skipping PR {prNumber}.");
+            _logger.LogWarning(
+                "User '{Owner}' not found in database. Skipping PR #{PrNumber}.",
+                owner, prNumber);
             return;
         }
 
+        
         var repository = await _db.Repositories
+            .AsNoTracking()
             .FirstOrDefaultAsync(r => r.UserId == user.Id && r.RepoName == repo);
+
         if (repository == null)
         {
-            Console.WriteLine($"❌ Repo '{repo}' not found. Skipping PR #{prNumber}.");
+            _logger.LogWarning(
+                "Repo '{Repo}' not found for user '{Owner}'. Skipping PR #{PrNumber}.",
+                repo, owner, prNumber);
             return;
         }
 
-        var accessToken = _encryption.Decrypt(user.EncryptedAccessToken);
-        var files = await _gitHubService.GetPrFilesAsync(owner!, repo!, prNumber!.Value, accessToken);
-
-        var review = new Revix.Core.Entities.Review
+        
+        var job = new ReviewJob
         {
-            Id = Guid.NewGuid(),
-            RepositoryId = repository.Id,
-            PrNumber = prNumber!.Value,
-            PrTitle = prTitle!,
-            FilesReviewed = files.Count,
-            CommentsPosted = 0,
-            LlmTokensUsed = 0,
-            CreatedAt = DateTime.UtcNow
+            Owner     = owner,
+            Repo      = repo,
+            PrNumber  = prNumber.Value,
+            PrTitle   = prTitle,
+            CommitSha = commitSha,
+            RepoDbId  = repository.Id.ToString()
         };
-        await _db.Reviews.AddAsync(review);
 
-        var allReviews = new List<string>();
-        int totalComments = 0;
-
-        foreach (var file in files)
+        try
         {
-            Console.WriteLine($"🤖 Reviewing {file.FileName}...");
-            var reviewText = await _groq.ReviewCodeAsync(file.Language, file.FileName, file.Patch);
-            allReviews.Add($"**{file.FileName}**\n{reviewText}");
-
-            await _db.ReviewComments.AddAsync(new Revix.Core.Entities.ReviewComment
-            {
-                Id = Guid.NewGuid(),
-                ReviewId = review.Id,
-                FileName = file.FileName,
-                LineNumber = 0,
-                Comment = reviewText,
-                Severity = ExtractSeverity(reviewText),
-                CreatedAt = DateTime.UtcNow
-            });
-            totalComments++;
-
-            await _commentService.PostInlineCommentAsync(
-                owner!, repo!, prNumber!.Value,
-                commitSha!, file.FileName, 1,
-                reviewText, accessToken);
+            await _reviewQueue.EnqueueAsync(job);
+            _logger.LogInformation(
+                "PR #{PrNumber} ({Owner}/{Repo}) enqueued successfully. SHA={Sha}",
+                job.PrNumber, job.Owner, job.Repo, job.CommitSha);
         }
+        catch (Exception ex)
+        {
+           
+            _logger.LogError(ex,
+                "Failed to enqueue PR #{PrNumber} ({Owner}/{Repo}). " +
+                "GitHub will retry the webhook automatically.",
+                job.PrNumber, job.Owner, job.Repo);
 
-        var summary = string.Join("\n\n---\n\n", allReviews);
-        await _commentService.PostSummaryCommentAsync(owner!, repo!, prNumber!.Value, summary, accessToken);
-
-        review.CommentsPosted = totalComments;
-        await _db.SaveChangesAsync();
-
-        Console.WriteLine($"✅ Review complete. {totalComments} comments posted.");
-    }
-
-    private string ExtractSeverity(string review)
-    {
-        if (review.Contains("[Bug]") || review.Contains("Bug")) return "Bug";
-        if (review.Contains("[Warning]") || review.Contains("Warning")) return "Warning";
-        return "Suggestion";
+            throw;
+        }
     }
 }
