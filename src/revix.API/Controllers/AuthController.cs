@@ -12,7 +12,7 @@ public class AuthController : ControllerBase
      private readonly IConfiguration _config;
 
     public AuthController(IConfiguration config)
-    {
+    {   
         _config = config;
     }
 
@@ -24,9 +24,18 @@ public class AuthController : ControllerBase
         {
             RedirectUri = $"{frontendUrl}/dashboard"
         };
+        properties.Parameters["prompt"] = "consent";
+
         return Challenge(properties, "GitHub");
     }
-    
+
+    [HttpGet("github/callback")]
+    public IActionResult GitHubAppCallback([FromQuery] string installation_id, [FromQuery] string setup_action)
+    {
+        var frontendUrl = _config["App:FrontendUrl"]!;
+        return Redirect($"{frontendUrl}/repos?installed=true");
+    }
+
     [HttpGet("me")]
     [Authorize]
     public IActionResult Me()

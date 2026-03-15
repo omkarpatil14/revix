@@ -12,9 +12,9 @@ namespace Revix.API.Controllers;
 [Authorize]
 public class ReposController : ControllerBase
 {
-    private readonly RevixDbContext  _db;
-    private readonly IGitHubService  _github;
-    private readonly IConfiguration  _config;
+    private readonly RevixDbContext _db;
+    private readonly IGitHubService _github;
+    private readonly IConfiguration _config;
     private readonly ITokenEncryptionService _encryption;
 
     public ReposController(
@@ -29,36 +29,100 @@ public class ReposController : ControllerBase
         _encryption = encryption;
     }
 
-    // ── GET /api/repos/github ─────────────────────────────────────────────────
-    // Fetch all repos from GitHub for the logged-in user
-    // Frontend uses this to show a picker so user can choose which repo to connect
-    [HttpGet("github")]
-    public async Task<IActionResult> GetGitHubRepos()
+    // ── POST /api/repos/sync ──────────────────────────────────────────────────
+    // Auto-syncs ALL GitHub repos for the logged-in user
+    // Called once after login — connects every repo automatically with a webhook
+    [HttpPost("sync")]
+    public async Task<IActionResult> SyncRepos()
     {
         var (user, accessToken) = await GetCurrentUserWithTokenAsync();
         if (user == null) return Unauthorized();
 
-        var repos = await _github.GetUserReposAsync(accessToken);
+        List<Revix.Core.Models.GitHubRepo> githubRepos;
+        try
+        {
+            githubRepos = await _github.GetUserReposAsync(accessToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Failed to fetch GitHub repos: {ex.Message}");
+            return StatusCode(500, new { message = "Failed to fetch repositories from GitHub." });
+        }
 
-        
-        var connectedRepoNames = await _db.Repositories
+        // Get all already-connected repo names for this user
+        var existingRepoNames = await _db.Repositories
             .Where(r => r.UserId == user.Id)
             .Select(r => r.RepoName)
-            .ToListAsync();
+            .ToHashSetAsync();
 
-        var result = repos.Select(r => new
+        var webhookUrl    = _config["App:WebhookUrl"]!;
+        var webhookSecret = _config["GitHub:WebhookSecret"]!;
+
+        var newRepos      = new List<Revix.Core.Entities.Repository>();
+        var skippedCount  = 0;
+        var failedRepos   = new List<string>();
+
+        foreach (var ghRepo in githubRepos)
         {
-            r.Id,
-            r.Name,
-            r.FullName,
-            r.Private,
-            r.HtmlUrl,
-            IsConnected = connectedRepoNames.Contains(r.Name)
-        });
+            // Already connected — skip
+            if (existingRepoNames.Contains(ghRepo.Name))
+            {
+                skippedCount++;
+                continue;
+            }
 
-        return Ok(result);
+            long webhookId = 0;
+            try
+            {
+                webhookId = await _github.CreateWebhookAsync(
+                    user.GitHubUsername,
+                    ghRepo.Name,
+                    webhookUrl,
+                    webhookSecret,
+                    accessToken);
+
+                Console.WriteLine($"✅ Webhook created for {ghRepo.Name} (id: {webhookId})");
+            }
+            catch (Exception ex)
+            {
+                // Don't block the whole sync — save repo without webhook
+                // Webhook can be retried later
+                Console.WriteLine($"⚠️ Could not create webhook for {ghRepo.Name}: {ex.Message}");
+                failedRepos.Add(ghRepo.Name);
+            }
+
+            newRepos.Add(new Revix.Core.Entities.Repository
+            {
+                Id              = Guid.NewGuid(),
+                UserId          = user.Id,
+                GitHubRepoId    = ghRepo.Id.ToString(),
+                RepoName        = ghRepo.Name,
+                IsEnabled       = true,
+                GitHubWebhookId = webhookId,
+                CreatedAt       = DateTime.UtcNow
+            });
+        }
+
+        if (newRepos.Any())
+        {
+            await _db.Repositories.AddRangeAsync(newRepos);
+            await _db.SaveChangesAsync();
+        }
+
+        return Ok(new
+        {
+            Total        = githubRepos.Count,
+            Added        = newRepos.Count,
+            Skipped      = skippedCount,
+            WebhookFailed = failedRepos,
+            Message      = newRepos.Count == 0
+                ? "All repositories are already connected."
+                : $"Successfully connected {newRepos.Count} new repository/repositories."
+        });
     }
 
+    // ── GET /api/repos ────────────────────────────────────────────────────────
+    // Returns all connected repos for the logged-in user (from our DB)
     [HttpGet]
     public async Task<IActionResult> GetRepos()
     {
@@ -85,64 +149,8 @@ public class ReposController : ControllerBase
         return Ok(repos);
     }
 
-
-    [HttpPost]
-    public async Task<IActionResult> ConnectRepo([FromBody] ConnectRepoRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.RepoName))
-            return BadRequest("RepoName is required.");
-
-        var (user, accessToken) = await GetCurrentUserWithTokenAsync();
-        if (user == null) return Unauthorized();
-
-        // Check if already connected
-        var existing = await _db.Repositories
-            .FirstOrDefaultAsync(r => r.UserId == user.Id && r.RepoName == request.RepoName);
-
-        if (existing != null)
-            return Conflict(new { message = $"'{request.RepoName}' is already connected." });
-
-        // Create webhook on GitHub
-        var webhookUrl    = _config["App:WebhookUrl"]!;  // e.g. https://xxxx.ngrok.io/webhook
-        var webhookSecret = _config["GitHub:WebhookSecret"]!;
-        var owner         = user.GitHubUsername;
-
-        long webhookId;
-        try
-        {
-            webhookId = await _github.CreateWebhookAsync(
-                owner, request.RepoName, webhookUrl, webhookSecret, accessToken);
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { message = $"Failed to create GitHub webhook: {ex.Message}" });
-        }
-
-        // Save to DB
-        var repo = new Revix.Core.Entities.Repository
-        {
-            Id             = Guid.NewGuid(),
-            UserId         = user.Id,
-            GitHubRepoId   = request.GitHubRepoId ?? "0",
-            RepoName       = request.RepoName,
-            IsEnabled      = true,
-            GitHubWebhookId = webhookId,
-            CreatedAt      = DateTime.UtcNow
-        };
-
-        await _db.Repositories.AddAsync(repo);
-        await _db.SaveChangesAsync();
-
-        return CreatedAtAction(nameof(GetRepo), new { id = repo.Id }, new
-        {
-            repo.Id,
-            repo.RepoName,
-            repo.IsEnabled,
-            repo.CreatedAt
-        });
-    }
-
-
+    // ── GET /api/repos/{id} ───────────────────────────────────────────────────
+    // Returns a single repo with full review history and stats
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetRepo(Guid id)
     {
@@ -185,64 +193,8 @@ public class ReposController : ControllerBase
         return Ok(repo);
     }
 
- 
-    [HttpPatch("{id:guid}/toggle")]
-    public async Task<IActionResult> ToggleRepo(Guid id)
-    {
-        var (user, accessToken) = await GetCurrentUserWithTokenAsync();
-        if (user == null) return Unauthorized();
-
-        var repo = await _db.Repositories
-            .FirstOrDefaultAsync(r => r.Id == id && r.UserId == user.Id);
-
-        if (repo == null) return NotFound();
-
-        var webhookUrl    = _config["App:WebhookUrl"]!;
-        var webhookSecret = _config["GitHub:WebhookSecret"]!;
-
-        if (repo.IsEnabled)
-        {
-            // Currently enabled → disable → delete webhook from GitHub
-            try
-            {
-                if (repo.GitHubWebhookId != 0)
-                    await _github.DeleteWebhookAsync(
-                        user.GitHubUsername, repo.RepoName,
-                        repo.GitHubWebhookId, accessToken);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = $"Failed to delete GitHub webhook: {ex.Message}" });
-            }
-
-            repo.GitHubWebhookId = 0;
-            repo.IsEnabled       = false;
-        }
-        else
-        {
-            // Currently disabled → enable → recreate webhook on GitHub
-            try
-            {
-                var webhookId = await _github.CreateWebhookAsync(
-                    user.GitHubUsername, repo.RepoName,
-                    webhookUrl, webhookSecret, accessToken);
-
-                repo.GitHubWebhookId = webhookId;
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = $"Failed to create GitHub webhook: {ex.Message}" });
-            }
-
-            repo.IsEnabled = true;
-        }
-
-        await _db.SaveChangesAsync();
-
-        return Ok(new { repo.Id, repo.RepoName, repo.IsEnabled });
-    }
-
-   
+    // ── DELETE /api/repos/{id} ────────────────────────────────────────────────
+    // Removes a repo from Revix and deletes the webhook from GitHub
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteRepo(Guid id)
     {
@@ -254,18 +206,23 @@ public class ReposController : ControllerBase
 
         if (repo == null) return NotFound();
 
-        // Delete webhook from GitHub
+        // Delete webhook from GitHub — don't block DB deletion if this fails
         try
         {
             if (repo.GitHubWebhookId != 0)
+            {
                 await _github.DeleteWebhookAsync(
-                    user.GitHubUsername, repo.RepoName,
-                    repo.GitHubWebhookId, accessToken);
+                    user.GitHubUsername,
+                    repo.RepoName,
+                    repo.GitHubWebhookId,
+                    accessToken);
+
+                Console.WriteLine($"✅ Webhook deleted for {repo.RepoName}");
+            }
         }
         catch (Exception ex)
         {
-            // Log but don't block deletion — webhook may already be gone
-            Console.WriteLine($"Warning: Could not delete GitHub webhook: {ex.Message}");
+            Console.WriteLine($"⚠️ Could not delete GitHub webhook for {repo.RepoName}: {ex.Message}");
         }
 
         _db.Repositories.Remove(repo);
@@ -274,7 +231,50 @@ public class ReposController : ControllerBase
         return NoContent();
     }
 
+    // ── POST /api/repos/{id}/retry-webhook ───────────────────────────────────
+    // Retries webhook creation for repos where it failed during sync
+    [HttpPost("{id:guid}/retry-webhook")]
+    public async Task<IActionResult> RetryWebhook(Guid id)
+    {
+        var (user, accessToken) = await GetCurrentUserWithTokenAsync();
+        if (user == null) return Unauthorized();
 
+        var repo = await _db.Repositories
+            .FirstOrDefaultAsync(r => r.Id == id && r.UserId == user.Id);
+
+        if (repo == null) return NotFound();
+
+        if (repo.GitHubWebhookId != 0)
+            return Ok(new { message = "Webhook already exists for this repository." });
+
+        var webhookUrl    = _config["App:WebhookUrl"]!;
+        var webhookSecret = _config["GitHub:WebhookSecret"]!;
+
+        try
+        {
+            var webhookId = await _github.CreateWebhookAsync(
+                user.GitHubUsername,
+                repo.RepoName,
+                webhookUrl,
+                webhookSecret,
+                accessToken);
+
+            repo.GitHubWebhookId = webhookId;
+            repo.IsEnabled       = true;
+            await _db.SaveChangesAsync();
+
+            Console.WriteLine($"✅ Webhook retried successfully for {repo.RepoName} (id: {webhookId})");
+
+            return Ok(new { repo.Id, repo.RepoName, repo.IsEnabled, WebhookId = webhookId });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Retry webhook failed for {repo.RepoName}: {ex.Message}");
+            return StatusCode(500, new { message = $"Failed to create webhook: {ex.Message}" });
+        }
+    }
+
+    // ── Private helper ────────────────────────────────────────────────────────
     private async Task<(Revix.Core.Entities.User? user, string accessToken)> GetCurrentUserWithTokenAsync()
     {
         var githubId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -287,5 +287,3 @@ public class ReposController : ControllerBase
         return (user, accessToken);
     }
 }
-
-public record ConnectRepoRequest(string RepoName, string? GitHubRepoId);
