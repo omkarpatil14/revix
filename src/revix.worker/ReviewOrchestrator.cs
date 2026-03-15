@@ -85,6 +85,8 @@ public class ReviewOrchestrator
             var reviewText = await _groq.ReviewCodeAsync(file.Language, file.FileName, file.Patch);
             allReviews.Add($"**{file.FileName}**\n{reviewText}");
 
+            var diffPosition = GetLastDiffPosition(file.Patch);
+
             await _db.ReviewComments.AddAsync(new Revix.Core.Entities.ReviewComment
             {
                 Id        = Guid.NewGuid(),
@@ -99,7 +101,7 @@ public class ReviewOrchestrator
 
             await _comments.PostInlineCommentAsync(
                 job.Owner, job.Repo, job.PrNumber,
-                job.CommitSha, file.FileName, 1,
+                job.CommitSha, file.FileName, diffPosition,
                 reviewText, accessToken);
         }
 
@@ -122,5 +124,23 @@ public class ReviewOrchestrator
         if (review.Contains("[Bug]")     || review.Contains("Bug"))     return "Bug";
         if (review.Contains("[Warning]") || review.Contains("Warning")) return "Warning";
         return "Suggestion";
+    }
+
+    private static int GetLastDiffPosition(string patch)
+    {
+        if (string.IsNullOrWhiteSpace(patch)) return 1;
+        
+        var lines = patch.Split('\n');
+        int position = 0;
+        int lastAddedLine = 1;
+        
+        foreach (var line in lines)
+        {
+            position++;
+            if (line.StartsWith('+') && !line.StartsWith("+++"))
+                lastAddedLine = position;
+        }
+        
+        return lastAddedLine;
     }
 }
