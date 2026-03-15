@@ -11,6 +11,7 @@ using Polly.Extensions.Http;
 using StackExchange.Redis; 
 using Revix.Core.Constants;
 using Revix.Worker;
+using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -114,7 +115,7 @@ builder.Services.Configure<CookiePolicyOptions>(options =>
     options.CheckConsentNeeded   = _ => false;
 });
 
-builder.Services.AddDataProtection();
+
 builder.Services.AddScoped<ITokenEncryptionService, TokenEncryptionService>();
 builder.Services.AddScoped<IGitHubAuthService, GitHubAuthService>();
 builder.Services.AddScoped<IWebhookService, WebhookService>();
