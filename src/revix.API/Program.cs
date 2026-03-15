@@ -126,7 +126,9 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 builder.Services.AddSingleton<ReviewQueue>();
 builder.Services.AddScoped<ReviewOrchestrator>();
 builder.Services.AddHostedService<ReviewWorkerService>();
-
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(
+        Path.Combine(builder.Environment.ContentRootPath, "DataProtection-Keys")));
 
 
 

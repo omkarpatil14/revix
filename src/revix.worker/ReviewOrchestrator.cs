@@ -48,6 +48,7 @@ public class ReviewOrchestrator
         }
 
         var accessToken = _encryption.Decrypt(repository.User.EncryptedAccessToken);
+        _logger.LogInformation("Token starts with: {Token}", accessToken[..10]);
 
         // 2. Fetch changed files
         var files = await _github.GetPrFilesAsync(
