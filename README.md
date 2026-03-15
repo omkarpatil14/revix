@@ -109,7 +109,7 @@ Each file in a PR is reviewed for:
 | GET | `/auth/login` | GitHub OAuth login |
 | GET | `/auth/callback` | OAuth callback |
 | POST | `/api/webhook` | GitHub webhook receiver |
-| POST | `/api/groq/review` | Manual code review  |
+| POST | `/api/groq/review` | Manual code review ] |
 
 ## Database Schema
 
