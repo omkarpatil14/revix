@@ -31,11 +31,13 @@ public class GitHubService : IGitHubService
 
     private bool IsIgnored(string filename) =>
         filename.EndsWith(".json") ||
-        filename.EndsWith(".md") ||
-        filename.EndsWith(".yml") ||
+        filename.EndsWith(".md")   ||
+        filename.EndsWith(".yml")  ||
         filename.EndsWith(".yaml") ||
-        filename.Contains("migrations/") ||
-        filename.Contains("Migrations/");
+        filename.EndsWith(".xml")  ||
+        filename.Contains("migrations/")     ||
+        filename.Contains("Migrations/")     ||
+        filename.Contains("DataProtection");
 
     private string DetectLanguage(string filename) =>
         Path.GetExtension(filename).ToLower() switch
