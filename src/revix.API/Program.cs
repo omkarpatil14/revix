@@ -8,6 +8,9 @@ using Revix.Core.Interfaces;
 using Revix.Infrastructure.Services;
 using Polly;
 using Polly.Extensions.Http;
+using StackExchange.Redis; 
+using Revix.Core.Constants;
+using Revix.Worker;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -117,6 +120,12 @@ builder.Services.AddScoped<IGitHubAuthService, GitHubAuthService>();
 builder.Services.AddScoped<IWebhookService, WebhookService>();
 builder.Services.AddScoped<IGitHubService, GitHubService>();
 builder.Services.AddScoped<ICommentService, CommentService>();
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+    ConnectionMultiplexer.Connect(
+        builder.Configuration["Redis:ConnectionString"]!));
+builder.Services.AddSingleton<ReviewQueue>();
+builder.Services.AddScoped<ReviewOrchestrator>();
+builder.Services.AddHostedService<ReviewWorkerService>();
 
 
 
@@ -127,5 +136,20 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
+var db = redis.GetDatabase();
+try
+{
+    await db.StreamCreateConsumerGroupAsync(
+        StreamNames.Reviews,
+        StreamNames.ConsumerGroup,
+        StreamPosition.NewMessages,
+        createStream: true);   // creates the stream key if it doesn't exist yet
+}
+catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
+{
+    System.Console.WriteLine("Consumer group already exists, skipping creation.");
+}
 
 app.Run();

@@ -21,11 +21,13 @@
     <PackageReference Include="Octokit" Version="14.0.0" />
     <PackageReference Include="Polly" Version="8.6.6" />
     <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
+    <PackageReference Include="StackExchange.Redis" Version="2.12.1" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Revix.Core\revix.core.csproj" />
     <ProjectReference Include="..\Revix.Infrastructure\revix.infrastructure.csproj" />
+    <ProjectReference Include="..\Revix.Worker\Revix.Worker.csproj" />
   </ItemGroup>
 
 </Project>
