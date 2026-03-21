@@ -3,16 +3,15 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
-using Revix.Core.Interfaces;
 
 [ApiController]
 [Route("auth")]
 public class AuthController : ControllerBase
 {
-     private readonly IConfiguration _config;
+    private readonly IConfiguration _config;
 
     public AuthController(IConfiguration config)
-    {   
+    {
         _config = config;
     }
 
@@ -23,6 +22,7 @@ public class AuthController : ControllerBase
         {
             RedirectUri = "/auth/complete"
         };
+
         return Challenge(properties, "GitHub");
     }
 
@@ -34,11 +34,11 @@ public class AuthController : ControllerBase
         return Redirect($"{frontendUrl}/dashboard");
     }
 
+
     [HttpGet("github/callback")]
-    public IActionResult GitHubAppCallback([FromQuery] string installation_id, [FromQuery] string setup_action)
+    public IActionResult GitHubCallback()
     {
-        var frontendUrl = _config["App:FrontendUrl"]!;
-        return Redirect($"{frontendUrl}/repos?installed=true");
+        return Ok(); 
     }
 
     [HttpGet("me")]
@@ -47,7 +47,7 @@ public class AuthController : ControllerBase
     {
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var username = User.FindFirst(ClaimTypes.Name)?.Value;
-        var  avatarUrl = User.FindFirst("avatar_url")?.Value;
+        var avatarUrl = User.FindFirst("avatar_url")?.Value;
         var profileUrl = User.FindFirst("profile_url")?.Value;
 
         return Ok(new
@@ -55,15 +55,9 @@ public class AuthController : ControllerBase
             Message = "Login Successful",
             GitHubId = userId,
             Username = username,
-            AvatarUrl  = avatarUrl,
+            AvatarUrl = avatarUrl,
             ProfileUrl = profileUrl
         });
-    }
-
-    [HttpGet("error")]
-    public IActionResult Error()
-    {
-        return StatusCode(500, "OAuth login failed. Check server logs.");
     }
 
     [HttpGet("logout")]
@@ -73,5 +67,9 @@ public class AuthController : ControllerBase
         return Ok("Logged out");
     }
 
-
+    [HttpGet("error")]
+    public IActionResult Error()
+    {
+        return StatusCode(500, "OAuth login failed.");
+    }
 }

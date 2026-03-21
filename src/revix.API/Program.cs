@@ -12,6 +12,7 @@ using StackExchange.Redis;
 using Revix.Core.Constants;
 using Revix.Worker;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -45,13 +46,15 @@ builder.Services.AddCors(options =>
 });
 
 // =======================
-// FORWARDED HEADERS (trust ngrok proxy)
+// FORWARDED HEADERS (ngrok / proxy)
 // =======================
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
-                             | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor;
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedProto |
+        ForwardedHeaders.XForwardedFor;
+
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
@@ -69,8 +72,11 @@ builder.Services.AddAuthentication(options =>
     options.Cookie.Name         = "Revix.Auth";
     options.Cookie.HttpOnly     = true;
     options.Cookie.IsEssential  = true;
+
+    // IMPORTANT
     options.Cookie.SameSite     = SameSiteMode.None;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+
     options.Events.OnRedirectToLogin = context =>
     {
         context.Response.StatusCode = 401;
@@ -81,7 +87,9 @@ builder.Services.AddAuthentication(options =>
 {
     options.ClientId     = builder.Configuration["GitHub:ClientId"]!;
     options.ClientSecret = builder.Configuration["GitHub:ClientSecret"]!;
-    options.CallbackPath = "/auth/callback";
+
+    // ✅ FIXED CALLBACK
+    options.CallbackPath = "/auth/github/callback";
 
     options.AuthorizationEndpoint   = "https://github.com/login/oauth/authorize";
     options.TokenEndpoint           = "https://github.com/login/oauth/access_token";
@@ -93,6 +101,7 @@ builder.Services.AddAuthentication(options =>
 
     options.SaveTokens = true;
 
+    // ✅ CORRELATION COOKIE FIX
     options.CorrelationCookie.Name         = ".Revix.OAuth.Correlation";
     options.CorrelationCookie.HttpOnly     = true;
     options.CorrelationCookie.IsEssential  = true;
@@ -104,7 +113,8 @@ builder.Services.AddAuthentication(options =>
         OnCreatingTicket = async context =>
         {
             var request = new HttpRequestMessage(HttpMethod.Get, context.Options.UserInformationEndpoint);
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", context.AccessToken);
+            request.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", context.AccessToken);
             request.Headers.Add("User-Agent", "Revix");
 
             var response = await context.Backchannel.SendAsync(request);
@@ -117,7 +127,7 @@ builder.Services.AddAuthentication(options =>
             var avatarUrl  = userJson.RootElement.GetProperty("avatar_url").GetString()!;
             var profileUrl = userJson.RootElement.GetProperty("html_url").GetString()!;
 
-            context.Identity!.AddClaim(new Claim("avatar_url",  avatarUrl));
+            context.Identity!.AddClaim(new Claim("avatar_url", avatarUrl));
             context.Identity!.AddClaim(new Claim("profile_url", profileUrl));
             context.Identity!.AddClaim(new Claim(ClaimTypes.NameIdentifier, githubId));
             context.Identity.AddClaim(new Claim(ClaimTypes.Name, username));
@@ -132,6 +142,10 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
+// =======================
+// HTTP CLIENT + POLLY
+// =======================
+
 builder.Services.AddHttpClient<IGroqService, GroqService>()
     .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
@@ -145,8 +159,8 @@ builder.Services.AddHttpClient<IGroqService, GroqService>()
 builder.Services.Configure<CookiePolicyOptions>(options =>
 {
     options.MinimumSameSitePolicy = SameSiteMode.None;
-    options.Secure               = CookieSecurePolicy.Always;
-    options.CheckConsentNeeded   = _ => false;
+    options.Secure = CookieSecurePolicy.Always;
+    options.CheckConsentNeeded = _ => false;
 });
 
 // =======================
@@ -158,12 +172,15 @@ builder.Services.AddScoped<IGitHubAuthService, GitHubAuthService>();
 builder.Services.AddScoped<IWebhookService, WebhookService>();
 builder.Services.AddScoped<IGitHubService, GitHubService>();
 builder.Services.AddScoped<ICommentService, CommentService>();
+
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
     ConnectionMultiplexer.Connect(
         builder.Configuration["Redis:ConnectionString"]!));
+
 builder.Services.AddSingleton<ReviewQueue>();
 builder.Services.AddScoped<ReviewOrchestrator>();
 builder.Services.AddHostedService<ReviewWorkerService>();
+
 builder.Services.AddDataProtection()
     .PersistKeysToStackExchangeRedis(
         ConnectionMultiplexer.Connect(builder.Configuration["Redis:ConnectionString"]!),
@@ -174,13 +191,10 @@ builder.Services.AddDataProtection()
 // =======================
 
 var app = builder.Build();
-app.Use(async (context, next) =>
-{
-    context.Request.Scheme = "https";
-    await next();
-});
 
+// ✅ MUST BE FIRST
 app.UseForwardedHeaders();
+
 app.UseCors("Frontend");
 
 app.UseCookiePolicy();
@@ -195,6 +209,7 @@ app.MapControllers();
 
 var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
 var redisDb = redis.GetDatabase();
+
 try
 {
     await redisDb.StreamCreateConsumerGroupAsync(
@@ -207,9 +222,10 @@ try
 }
 catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
 {
-    Console.WriteLine("ℹ️ Consumer group already exists, skipping creation.");
+    Console.WriteLine("ℹ️ Consumer group already exists.");
 }
 
+// HTTP only internally (ngrok handles HTTPS)
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 app.Urls.Add($"http://0.0.0.0:{port}");
 
