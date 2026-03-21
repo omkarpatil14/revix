@@ -164,7 +164,10 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 builder.Services.AddSingleton<ReviewQueue>();
 builder.Services.AddScoped<ReviewOrchestrator>();
 builder.Services.AddHostedService<ReviewWorkerService>();
-builder.Services.AddDataProtection();
+builder.Services.AddDataProtection()
+    .PersistKeysToStackExchangeRedis(
+        ConnectionMultiplexer.Connect(builder.Configuration["Redis:ConnectionString"]!),
+        "DataProtection-Keys");
 
 // =======================
 // BUILD
