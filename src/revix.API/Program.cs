@@ -164,9 +164,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 builder.Services.AddSingleton<ReviewQueue>();
 builder.Services.AddScoped<ReviewOrchestrator>();
 builder.Services.AddHostedService<ReviewWorkerService>();
-builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo(
-        Path.Combine(builder.Environment.ContentRootPath, "DataProtection-Keys")));
+builder.Services.AddDataProtection();
 
 // =======================
 // BUILD
@@ -202,5 +200,8 @@ catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
 {
     Console.WriteLine("ℹ️ Consumer group already exists, skipping creation.");
 }
+
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+app.Urls.Add($"http://0.0.0.0:{port}");
 
 app.Run();

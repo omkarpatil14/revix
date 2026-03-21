@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Revix.Core\revix.core.csproj" />
+    <ProjectReference Include="..\revix.core\revix.core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
