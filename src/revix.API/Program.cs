@@ -70,7 +70,7 @@ builder.Services.AddAuthentication(options =>
     options.Cookie.HttpOnly     = true;
     options.Cookie.IsEssential  = true;
     options.Cookie.SameSite     = SameSiteMode.None;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Events.OnRedirectToLogin = context =>
     {
         context.Response.StatusCode = 401;
@@ -145,7 +145,7 @@ builder.Services.AddHttpClient<IGroqService, GroqService>()
 builder.Services.Configure<CookiePolicyOptions>(options =>
 {
     options.MinimumSameSitePolicy = SameSiteMode.None;
-    options.Secure               = CookieSecurePolicy.SameAsRequest;
+    options.Secure               = CookieSecurePolicy.Always;
     options.CheckConsentNeeded   = _ => false;
 });
 
