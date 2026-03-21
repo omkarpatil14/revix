@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Revix.Core\revix.core.csproj" />
-    <ProjectReference Include="..\Revix.Infrastructure\revix.infrastructure.csproj" />
+    <ProjectReference Include="..\revix.core\revix.core.csproj" />
+    <ProjectReference Include="..\revix.infrastructure\revix.infrastructure.csproj" />
   </ItemGroup>
 </Project>

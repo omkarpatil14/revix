@@ -11,6 +11,7 @@
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OAuth" Version="2.3.9" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="10.0.5" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.5" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -25,10 +26,10 @@
     <PackageReference Include="StackExchange.Redis" Version="2.12.1" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Revix.Core\revix.core.csproj" />
-    <ProjectReference Include="..\Revix.Infrastructure\revix.infrastructure.csproj" />
-    <ProjectReference Include="..\Revix.Worker\Revix.Worker.csproj" />
-  </ItemGroup>
+<ItemGroup>
+  <ProjectReference Include="..\revix.core\revix.core.csproj" />
+  <ProjectReference Include="..\revix.infrastructure\revix.infrastructure.csproj" />
+  <ProjectReference Include="..\revix.worker\revix.worker.csproj" />
+</ItemGroup>
 
 </Project>
