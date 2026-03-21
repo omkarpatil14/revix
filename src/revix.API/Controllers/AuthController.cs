@@ -34,11 +34,11 @@ public class AuthController : ControllerBase
         return Redirect($"{frontendUrl}/dashboard");
     }
 
-
+    // MUST MATCH CALLBACK PATH
     [HttpGet("github/callback")]
     public IActionResult GitHubCallback()
     {
-        return Ok(); 
+        return Ok();
     }
 
     [HttpGet("me")]
@@ -65,11 +65,5 @@ public class AuthController : ControllerBase
     {
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Ok("Logged out");
-    }
-
-    [HttpGet("error")]
-    public IActionResult Error()
-    {
-        return StatusCode(500, "OAuth login failed.");
     }
 }
