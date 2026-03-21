@@ -44,7 +44,7 @@ builder.Services.AddCors(options =>
 });
 
 // =======================
-// FORWARDED HEADERS (FIX FOR RENDER HTTPS)
+// FORWARDED HEADERS (Render HTTPS FIX)
 // =======================
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -71,7 +71,7 @@ builder.Services.AddAuthentication(options =>
     options.Cookie.HttpOnly = true;
     options.Cookie.IsEssential = true;
 
-    // REQUIRED FOR CROSS-SITE (frontend != backend)
+    // required for frontend (Vercel) + backend (Render)
     options.Cookie.SameSite = SameSiteMode.None;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 
@@ -86,7 +86,7 @@ builder.Services.AddAuthentication(options =>
     options.ClientId = builder.Configuration["GitHub:ClientId"]!;
     options.ClientSecret = builder.Configuration["GitHub:ClientSecret"]!;
 
-    // MUST MATCH GITHUB SETTINGS
+    // MUST match GitHub OAuth App
     options.CallbackPath = "/auth/callback";
 
     options.AuthorizationEndpoint = "https://github.com/login/oauth/authorize";
@@ -99,7 +99,6 @@ builder.Services.AddAuthentication(options =>
 
     options.SaveTokens = true;
 
-    // CORRELATION COOKIE (IMPORTANT)
     options.CorrelationCookie.Name = ".Revix.OAuth.Correlation";
     options.CorrelationCookie.HttpOnly = true;
     options.CorrelationCookie.IsEssential = true;
@@ -108,11 +107,19 @@ builder.Services.AddAuthentication(options =>
 
     options.Events = new OAuthEvents
     {
-        // 🔥 FORCE HTTPS REDIRECT (FIX redirect_uri issue)
+        // Fix HTTP → HTTPS issue (Render)
         OnRedirectToAuthorizationEndpoint = context =>
         {
             var uri = context.RedirectUri.Replace("http://", "https://");
             context.Response.Redirect(uri);
+            return Task.CompletedTask;
+        },
+
+        OnRemoteFailure = context =>
+        {
+            Console.WriteLine("OAuth Error: " + context.Failure?.ToString());
+            context.Response.Redirect("/auth/error");
+            context.HandleResponse();
             return Task.CompletedTask;
         },
 
@@ -159,7 +166,7 @@ builder.Services.AddHttpClient<IGroqService, GroqService>()
             TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
 // =======================
-// REDIS (SINGLE INSTANCE FIX)
+// REDIS (SINGLE INSTANCE)
 // =======================
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
@@ -167,13 +174,12 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
         builder.Configuration["Redis:ConnectionString"]!));
 
 // =======================
-// DATA PROTECTION (FIXED)
+// DATA PROTECTION (WORKING FIX)
 // =======================
 
 builder.Services.AddDataProtection()
     .PersistKeysToStackExchangeRedis(
-        builder.Services.BuildServiceProvider()
-            .GetRequiredService<IConnectionMultiplexer>(),
+        ConnectionMultiplexer.Connect(builder.Configuration["Redis:ConnectionString"]!),
         "DataProtection-Keys");
 
 // =======================
@@ -196,8 +202,7 @@ builder.Services.AddHostedService<ReviewWorkerService>();
 
 var app = builder.Build();
 
-// 🔥 MUST BE FIRST (critical for HTTPS fix)
-app.UseForwardedHeaders();
+app.UseForwardedHeaders(); // MUST BE FIRST
 
 app.UseCors("Frontend");
 
@@ -229,7 +234,6 @@ catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
     Console.WriteLine("ℹ️ Consumer group already exists.");
 }
 
-// INTERNAL HTTP (Render handles HTTPS)
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 app.Urls.Add($"http://0.0.0.0:{port}");
 
