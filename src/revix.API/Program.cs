@@ -97,7 +97,7 @@ builder.Services.AddAuthentication(options =>
     options.CorrelationCookie.HttpOnly     = true;
     options.CorrelationCookie.IsEssential  = true;
     options.CorrelationCookie.SameSite     = SameSiteMode.None;
-    options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
 
     options.Events = new OAuthEvents
     {
@@ -174,9 +174,9 @@ builder.Services.AddDataProtection()
 // =======================
 
 var app = builder.Build();
-
-app.UseCors("Frontend");
 app.UseForwardedHeaders();
+app.UseCors("Frontend");
+
 app.UseCookiePolicy();
 app.UseAuthentication();
 app.UseAuthorization();

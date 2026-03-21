@@ -19,14 +19,19 @@ public class AuthController : ControllerBase
     [HttpGet("login")]
     public IActionResult Login()
     {
-        var frontendUrl = _config["App:FrontendUrl"]!;
         var properties = new AuthenticationProperties
         {
-            RedirectUri = $"{frontendUrl}/dashboard"
+            RedirectUri = "/auth/complete"
         };
-        properties.Parameters["prompt"] = "consent";
-
         return Challenge(properties, "GitHub");
+    }
+
+    [HttpGet("complete")]
+    [Authorize]
+    public IActionResult Complete()
+    {
+        var frontendUrl = _config["App:FrontendUrl"]!;
+        return Redirect($"{frontendUrl}/dashboard");
     }
 
     [HttpGet("github/callback")]
