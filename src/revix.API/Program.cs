@@ -174,6 +174,12 @@ builder.Services.AddDataProtection()
 // =======================
 
 var app = builder.Build();
+app.Use(async (context, next) =>
+{
+    context.Request.Scheme = "https";
+    await next();
+});
+
 app.UseForwardedHeaders();
 app.UseCors("Frontend");
 
