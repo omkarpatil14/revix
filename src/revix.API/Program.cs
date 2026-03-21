@@ -49,7 +49,6 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     options.Cookie.IsEssential  = true;
     options.Cookie.SameSite     = SameSiteMode.None;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-    options.Cookie.Domain       = ".onrender.com";
     options.Events.OnRedirectToLogin = context =>
     {
         context.Response.StatusCode = 401;
@@ -67,10 +66,11 @@ builder.Services.AddHttpClient<IGroqService, GroqService>()
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
     ConnectionMultiplexer.Connect(
         builder.Configuration["Redis:ConnectionString"]!));
-
+        
 builder.Services.AddDataProtection()
     .PersistKeysToStackExchangeRedis(
-        ConnectionMultiplexer.Connect(builder.Configuration["Redis:ConnectionString"]!),
+        builder.Services.BuildServiceProvider()
+            .GetRequiredService<IConnectionMultiplexer>(),
         "DataProtection-Keys");
 
 builder.Services.AddScoped<ITokenEncryptionService, TokenEncryptionService>();
