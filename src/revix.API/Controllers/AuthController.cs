@@ -22,7 +22,6 @@ public class AuthController : ControllerBase
         {
             RedirectUri = "/auth/complete"
         };
-
         return Challenge(properties, "GitHub");
     }
 
@@ -34,29 +33,16 @@ public class AuthController : ControllerBase
         return Redirect($"{frontendUrl}/dashboard");
     }
 
-    // MUST MATCH CALLBACK PATH
-    [HttpGet("github/callback")]
-    public IActionResult GitHubCallback()
-    {
-        return Ok();
-    }
-
     [HttpGet("me")]
     [Authorize]
     public IActionResult Me()
     {
-        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var username = User.FindFirst(ClaimTypes.Name)?.Value;
-        var avatarUrl = User.FindFirst("avatar_url")?.Value;
-        var profileUrl = User.FindFirst("profile_url")?.Value;
-
         return Ok(new
         {
-            Message = "Login Successful",
-            GitHubId = userId,
-            Username = username,
-            AvatarUrl = avatarUrl,
-            ProfileUrl = profileUrl
+            GitHubId   = User.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+            Username   = User.FindFirst(ClaimTypes.Name)?.Value,
+            AvatarUrl  = User.FindFirst("avatar_url")?.Value,
+            ProfileUrl = User.FindFirst("profile_url")?.Value,
         });
     }
 

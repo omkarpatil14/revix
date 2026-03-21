@@ -87,7 +87,7 @@ builder.Services.AddAuthentication(options =>
     options.ClientSecret = builder.Configuration["GitHub:ClientSecret"]!;
 
     // MUST MATCH GITHUB SETTINGS
-    options.CallbackPath = "/auth/github/callback";
+    options.CallbackPath = "/auth/callback";
 
     options.AuthorizationEndpoint = "https://github.com/login/oauth/authorize";
     options.TokenEndpoint = "https://github.com/login/oauth/access_token";
