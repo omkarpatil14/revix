@@ -1,9 +1,7 @@
 using Revix.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OAuth;
 using System.Security.Claims;
-using System.Text.Json;
 using Revix.Core.Interfaces;
 using Revix.Infrastructure.Services;
 using Polly;
@@ -50,11 +48,12 @@ var redisConnection = ConnectionMultiplexer.Connect(
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(redisConnection);
 
-// ✅ Fixed Data Protection
+// ✅ Data Protection keys persisted to Redis
 builder.Services.AddDataProtection()
     .SetApplicationName("Revix")
     .PersistKeysToStackExchangeRedis(redisConnection, "DataProtection-Keys");
 
+// ✅ Only cookie auth — OAuth handled manually in controller
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -70,77 +69,6 @@ builder.Services.AddAuthentication(options =>
     {
         context.Response.StatusCode = 401;
         return Task.CompletedTask;
-    };
-})
-.AddOAuth("GitHub", options =>
-{
-    options.ClientId     = builder.Configuration["GitHub:ClientId"]!;
-    options.ClientSecret = builder.Configuration["GitHub:ClientSecret"]!;
-    options.CallbackPath = "/auth/callback";
-
-    options.AuthorizationEndpoint   = "https://github.com/login/oauth/authorize";
-    options.TokenEndpoint           = "https://github.com/login/oauth/access_token";
-    options.UserInformationEndpoint = "https://api.github.com/user";
-
-    options.Scope.Add("read:user");
-    options.Scope.Add("repo");
-    options.Scope.Add("admin:repo_hook");
-
-    options.SaveTokens = true;
-
-    // ✅ KEY FIX: SameSite=None so cookie survives the GitHub redirect
-    options.CorrelationCookie.Name         = ".Revix.OAuth.Correlation";
-    options.CorrelationCookie.HttpOnly     = true;
-    options.CorrelationCookie.IsEssential  = true;
-    options.CorrelationCookie.SameSite     = SameSiteMode.None;
-    options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
-    // ✅ This prevents multiple stale correlation cookies building up
-    options.CorrelationCookie.Path        = "/auth/callback";
-
-    options.Events = new OAuthEvents
-    {
-        OnRedirectToAuthorizationEndpoint = context =>
-        {
-            var uri = context.RedirectUri.Replace("http://", "https://");
-            context.Response.Redirect(uri);
-            return Task.CompletedTask;
-        },
-
-        OnCreatingTicket = async context =>
-        {
-            var request = new HttpRequestMessage(HttpMethod.Get, context.Options.UserInformationEndpoint);
-            request.Headers.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", context.AccessToken);
-            request.Headers.Add("User-Agent", "Revix");
-
-            var response = await context.Backchannel.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var userJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-
-            var githubId   = userJson.RootElement.GetProperty("id").GetInt64().ToString();
-            var username   = userJson.RootElement.GetProperty("login").GetString()!;
-            var avatarUrl  = userJson.RootElement.GetProperty("avatar_url").GetString()!;
-            var profileUrl = userJson.RootElement.GetProperty("html_url").GetString()!;
-
-            context.Identity!.AddClaim(new Claim("avatar_url",  avatarUrl));
-            context.Identity!.AddClaim(new Claim("profile_url", profileUrl));
-            context.Identity!.AddClaim(new Claim(ClaimTypes.NameIdentifier, githubId));
-            context.Identity.AddClaim(new Claim(ClaimTypes.Name, username));
-
-            var authService = context.HttpContext.RequestServices
-                .GetRequiredService<IGitHubAuthService>();
-
-            await authService.HandleGitHubLoginAsync(githubId, username, context.AccessToken!);
-        },
-
-        OnRemoteFailure = context =>
-        {
-            var error = context.Failure?.Message ?? "Unknown OAuth error";
-            context.Response.Redirect($"/auth/error?message={Uri.EscapeDataString(error)}");
-            context.HandleResponse();
-            return Task.CompletedTask;
-        }
     };
 });
 
