@@ -50,7 +50,7 @@ var redisConnection = ConnectionMultiplexer.Connect(
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(redisConnection);
 
-// ✅ Fixed Data Protection — keys persist across restarts
+// ✅ Fixed Data Protection
 builder.Services.AddDataProtection()
     .SetApplicationName("Revix")
     .PersistKeysToStackExchangeRedis(redisConnection, "DataProtection-Keys");
@@ -88,11 +88,14 @@ builder.Services.AddAuthentication(options =>
 
     options.SaveTokens = true;
 
+    // ✅ KEY FIX: SameSite=None so cookie survives the GitHub redirect
     options.CorrelationCookie.Name         = ".Revix.OAuth.Correlation";
     options.CorrelationCookie.HttpOnly     = true;
     options.CorrelationCookie.IsEssential  = true;
     options.CorrelationCookie.SameSite     = SameSiteMode.None;
     options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
+    // ✅ This prevents multiple stale correlation cookies building up
+    options.CorrelationCookie.Path        = "/auth/callback";
 
     options.Events = new OAuthEvents
     {
@@ -131,7 +134,6 @@ builder.Services.AddAuthentication(options =>
             await authService.HandleGitHubLoginAsync(githubId, username, context.AccessToken!);
         },
 
-        // ✅ Shows actual error instead of blank 500
         OnRemoteFailure = context =>
         {
             var error = context.Failure?.Message ?? "Unknown OAuth error";
@@ -160,6 +162,7 @@ builder.Services.AddHostedService<ReviewWorkerService>();
 
 var app = builder.Build();
 
+// ✅ Force HTTPS scheme — Render terminates SSL at proxy level
 app.Use((context, next) =>
 {
     context.Request.Scheme = "https";
@@ -189,7 +192,6 @@ catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
     Console.WriteLine("ℹ️ Consumer group already exists.");
 }
 
-// ✅ Works for both local and Render
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 app.Urls.Add($"http://0.0.0.0:{port}");
 
