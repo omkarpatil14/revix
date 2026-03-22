@@ -16,6 +16,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.SetMinimumLevel(LogLevel.Debug);
+
 builder.Services.AddDbContext<RevixDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("DefaultConnection")
@@ -90,7 +94,7 @@ builder.Services.AddHostedService<ReviewWorkerService>();
 
 var app = builder.Build();
 
-// ✅ Force HTTPS scheme — Render terminates SSL at proxy level
+
 app.Use((context, next) =>
 {
     context.Request.Scheme = "https";
@@ -100,6 +104,35 @@ app.Use((context, next) =>
 app.UseForwardedHeaders();
 app.UseCors("Frontend");
 app.UseAuthentication();
+
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices
+        .GetRequiredService<ILogger<Program>>();
+
+    if (context.Request.Path.StartsWithSegments("/auth"))
+    {
+        logger.LogInformation("=== AUTH REQUEST ===");
+        logger.LogInformation("Path: {Path}", context.Request.Path);
+        logger.LogInformation("Method: {Method}", context.Request.Method);
+        logger.LogInformation("Origin: {Origin}", context.Request.Headers["Origin"]);
+        logger.LogInformation("Cookies: {Cookies}", string.Join(", ", context.Request.Cookies.Keys));
+        logger.LogInformation("Has Revix.Auth: {HasCookie}", context.Request.Cookies.ContainsKey("Revix.Auth"));
+        
+        await next();
+        
+        logger.LogInformation("=== AUTH RESPONSE ===");
+        logger.LogInformation("Status: {Status}", context.Response.StatusCode);
+        logger.LogInformation("Is Authenticated: {Auth}", context.User?.Identity?.IsAuthenticated);
+        logger.LogInformation("User: {User}", context.User?.Identity?.Name);
+    }
+    else
+    {
+        await next();
+    }
+});
+
+
 app.UseAuthorization();
 
 app.MapControllers();
