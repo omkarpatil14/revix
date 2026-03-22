@@ -18,7 +18,7 @@ builder.Services.AddHttpClient();
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
-builder.Logging.SetMinimumLevel(LogLevel.Debug);
+builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 builder.Services.AddDbContext<RevixDbContext>(options =>
     options.UseNpgsql(
@@ -46,18 +46,24 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownProxies.Clear();
 });
 
-// ✅ Build Redis connection once, reuse everywhere
-var redisConnection = ConnectionMultiplexer.Connect(
-    builder.Configuration["Redis:ConnectionString"]!);
+// ✅ Build Redis connection once
+var redisConnectionString = builder.Configuration["Redis:ConnectionString"]!
+    .Trim('"').Trim();  // ✅ Remove any quotes just in case
+
+Console.WriteLine($"🔌 Connecting to Redis: {redisConnectionString[..30]}...");
+
+var redisConnection = ConnectionMultiplexer.Connect(redisConnectionString);
+
+Console.WriteLine($"✅ Redis connected: {redisConnection.IsConnected}");
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(redisConnection);
 
-// ✅ Data Protection keys persisted to Redis
+// ✅ Data Protection persisted to Redis
 builder.Services.AddDataProtection()
     .SetApplicationName("Revix")
-    .PersistKeysToStackExchangeRedis(redisConnection, "DataProtection-Keys");
+    .PersistKeysToStackExchangeRedis(redisConnection, "DataProtection-Keys")
+    .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
-// ✅ Only cookie auth — OAuth handled manually in controller
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -94,7 +100,7 @@ builder.Services.AddHostedService<ReviewWorkerService>();
 
 var app = builder.Build();
 
-
+// ✅ Force HTTPS scheme for Render
 app.Use((context, next) =>
 {
     context.Request.Scheme = "https";
@@ -104,7 +110,9 @@ app.Use((context, next) =>
 app.UseForwardedHeaders();
 app.UseCors("Frontend");
 app.UseAuthentication();
+app.UseAuthorization();
 
+// ✅ Auth debug logging AFTER authentication
 app.Use(async (context, next) =>
 {
     var logger = context.RequestServices
@@ -114,17 +122,15 @@ app.Use(async (context, next) =>
     {
         logger.LogInformation("=== AUTH REQUEST ===");
         logger.LogInformation("Path: {Path}", context.Request.Path);
-        logger.LogInformation("Method: {Method}", context.Request.Method);
-        logger.LogInformation("Origin: {Origin}", context.Request.Headers["Origin"]);
         logger.LogInformation("Cookies: {Cookies}", string.Join(", ", context.Request.Cookies.Keys));
         logger.LogInformation("Has Revix.Auth: {HasCookie}", context.Request.Cookies.ContainsKey("Revix.Auth"));
-        
-        await next();
-        
-        logger.LogInformation("=== AUTH RESPONSE ===");
-        logger.LogInformation("Status: {Status}", context.Response.StatusCode);
         logger.LogInformation("Is Authenticated: {Auth}", context.User?.Identity?.IsAuthenticated);
         logger.LogInformation("User: {User}", context.User?.Identity?.Name);
+
+        await next();
+
+        logger.LogInformation("=== AUTH RESPONSE ===");
+        logger.LogInformation("Status: {Status}", context.Response.StatusCode);
     }
     else
     {
@@ -132,10 +138,12 @@ app.Use(async (context, next) =>
     }
 });
 
-
-app.UseAuthorization();
-
 app.MapControllers();
+
+// ✅ Verify Data Protection keys in Redis
+var dpRedis = redisConnection.GetDatabase();
+var keysExist = await dpRedis.KeyExistsAsync("DataProtection-Keys");
+Console.WriteLine($"🔑 DataProtection-Keys in Redis: {keysExist}");
 
 var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
 var redisDb = redis.GetDatabase();
