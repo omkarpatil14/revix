@@ -44,6 +44,17 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownProxies.Clear();
 });
 
+// ✅ Build Redis connection once, reuse everywhere
+var redisConnection = ConnectionMultiplexer.Connect(
+    builder.Configuration["Redis:ConnectionString"]!);
+
+builder.Services.AddSingleton<IConnectionMultiplexer>(redisConnection);
+
+// ✅ Fixed Data Protection — keys persist across restarts
+builder.Services.AddDataProtection()
+    .SetApplicationName("Revix")
+    .PersistKeysToStackExchangeRedis(redisConnection, "DataProtection-Keys");
+
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -118,6 +129,15 @@ builder.Services.AddAuthentication(options =>
                 .GetRequiredService<IGitHubAuthService>();
 
             await authService.HandleGitHubLoginAsync(githubId, username, context.AccessToken!);
+        },
+
+        // ✅ Shows actual error instead of blank 500
+        OnRemoteFailure = context =>
+        {
+            var error = context.Failure?.Message ?? "Unknown OAuth error";
+            context.Response.Redirect($"/auth/error?message={Uri.EscapeDataString(error)}");
+            context.HandleResponse();
+            return Task.CompletedTask;
         }
     };
 });
@@ -128,16 +148,6 @@ builder.Services.AddHttpClient<IGroqService, GroqService>()
     .AddTransientHttpErrorPolicy(p =>
         p.WaitAndRetryAsync(3, retryAttempt =>
             TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
-
-builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-    ConnectionMultiplexer.Connect(
-        builder.Configuration["Redis:ConnectionString"]!));
-
-builder.Services.AddDataProtection()
-    .PersistKeysToStackExchangeRedis(
-        builder.Services.BuildServiceProvider()
-            .GetRequiredService<IConnectionMultiplexer>(),
-        "DataProtection-Keys");
 
 builder.Services.AddScoped<ITokenEncryptionService, TokenEncryptionService>();
 builder.Services.AddScoped<IGitHubAuthService, GitHubAuthService>();
@@ -173,6 +183,7 @@ catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
     Console.WriteLine("ℹ️ Consumer group already exists.");
 }
 
+// ✅ Works for both local and Render
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 app.Urls.Add($"http://0.0.0.0:{port}");
 

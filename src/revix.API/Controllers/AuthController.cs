@@ -52,4 +52,14 @@ public class AuthController : ControllerBase
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Ok("Logged out");
     }
+
+    // ✅ Catches OAuth errors so you see what went wrong
+    [HttpGet("error")]
+    public IActionResult Error([FromQuery] string? message)
+    {
+        return Problem(
+            detail: message ?? "An error occurred during authentication.",
+            title: "Authentication Error",
+            statusCode: 400);
+    }
 }
