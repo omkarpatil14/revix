@@ -63,7 +63,7 @@ Console.WriteLine($"✅ Redis connected: {redisConnection.IsConnected}");
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(redisConnection);
 
-// ✅ Persist DataProtection keys to Redis so they survive Render restarts
+
 builder.Services.AddDataProtection()
     .SetApplicationName("Revix")
     .PersistKeysToStackExchangeRedis(redisConnection, "DataProtection-Keys")
@@ -105,7 +105,6 @@ builder.Services.AddHostedService<ReviewWorkerService>();
 
 var app = builder.Build();
 
-// ✅ Force HTTPS scheme for Render
 app.Use((context, next) =>
 {
     context.Request.Scheme = "https";
@@ -117,7 +116,7 @@ app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
 
-// ✅ Auth debug logging AFTER authentication
+
 app.Use(async (context, next) =>
 {
     var logger = context.RequestServices
@@ -145,7 +144,7 @@ app.Use(async (context, next) =>
 
 app.MapControllers();
 
-// ✅ Redis stream setup — always run regardless of environment
+
 var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
 var redisDb = redis.GetDatabase();
 
