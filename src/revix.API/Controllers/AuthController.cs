@@ -31,7 +31,6 @@ public class AuthController : ControllerBase
     [HttpGet("login")]
     public IActionResult Login()
     {
-        // Generate random state and store in Redis
         var state = Guid.NewGuid().ToString("N");
         var db    = _redis.GetDatabase();
         db.StringSet($"oauth:state:{state}", "valid", TimeSpan.FromMinutes(10));
@@ -56,16 +55,18 @@ public class AuthController : ControllerBase
     {
         var frontendUrl = _config["App:FrontendUrl"]!;
 
-        // Validate state from Redis
-        var db           = _redis.GetDatabase();
-        var storedState  = await db.StringGetAsync($"oauth:state:{state}");
+        var db          = _redis.GetDatabase();
+        var storedState = await db.StringGetAsync($"oauth:state:{state}");
         if (storedState.IsNullOrEmpty)
+        {
+            Console.WriteLine($"❌ Invalid state: {state}");
             return Redirect($"{frontendUrl}?error=invalid_state");
+        }
 
-        // Delete state so it cannot be reused
+     
         await db.KeyDeleteAsync($"oauth:state:{state}");
 
-        // Exchange code for access token
+      
         var client       = _httpClientFactory.CreateClient();
         var tokenRequest = new HttpRequestMessage(
             HttpMethod.Post,
@@ -82,14 +83,22 @@ public class AuthController : ControllerBase
 
         var tokenResponse = await client.SendAsync(tokenRequest);
         var tokenJson     = await tokenResponse.Content.ReadAsStringAsync();
-        var tokenDoc      = JsonDocument.Parse(tokenJson);
+
+  
+        Console.WriteLine($"🔑 GitHub token response: {tokenJson}");
+
+        var tokenDoc = JsonDocument.Parse(tokenJson);
 
         if (!tokenDoc.RootElement.TryGetProperty("access_token", out var tokenElement))
+        {
+       
+            Console.WriteLine($"❌ Token exchange failed. Response: {tokenJson}");
             return Redirect($"{frontendUrl}?error=token_exchange_failed");
+        }
 
         var accessToken = tokenElement.GetString()!;
 
-        // Get user info from GitHub
+       
         var userRequest = new HttpRequestMessage(
             HttpMethod.Get,
             "https://api.github.com/user");
@@ -107,10 +116,10 @@ public class AuthController : ControllerBase
         var avatarUrl  = userJson.RootElement.GetProperty("avatar_url").GetString()!;
         var profileUrl = userJson.RootElement.GetProperty("html_url").GetString()!;
 
-        // Save or update user in database
+     
         await _authService.HandleGitHubLoginAsync(githubId, username, accessToken);
 
-        // Create cookie session
+        
         var claims = new List<Claim>
         {
             new Claim(ClaimTypes.NameIdentifier, githubId),
@@ -127,9 +136,11 @@ public class AuthController : ControllerBase
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
             principal,
-            new AuthenticationProperties { 
+            new AuthenticationProperties
+            {
                 IsPersistent = true,
-                ExpiresUtc = DateTimeOffset.UtcNow.AddDays(7) });
+                ExpiresUtc   = DateTimeOffset.UtcNow.AddDays(7)
+            });
 
         return Redirect($"{frontendUrl}/dashboard");
     }
