@@ -1,15 +1,14 @@
 using Revix.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using System.Security.Claims;
 using Revix.Core.Interfaces;
 using Revix.Infrastructure.Services;
 using Polly;
 using StackExchange.Redis;
 using Revix.Core.Constants;
 using Revix.Worker;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
+using System.Security.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,23 +45,22 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownProxies.Clear();
 });
 
-// ✅ Build Redis connection once
 var redisConnectionString = builder.Configuration["Redis:ConnectionString"]!
-    .Trim('"').Trim();  // ✅ Remove any quotes just in case
+    .Trim('"').Trim();
 
 Console.WriteLine($"🔌 Connecting to Redis: {redisConnectionString[..30]}...");
 
-var redisConnection = ConnectionMultiplexer.Connect(redisConnectionString);
+var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
+redisOptions.Ssl = true;
+redisOptions.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+redisOptions.AbortOnConnectFail = false;
+redisOptions.ConnectTimeout = 10000;
+redisOptions.SyncTimeout = 10000;
 
+var redisConnection = await ConnectionMultiplexer.ConnectAsync(redisOptions);
 Console.WriteLine($"✅ Redis connected: {redisConnection.IsConnected}");
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(redisConnection);
-
-// ✅ Data Protection persisted to Redis
-builder.Services.AddDataProtection()
-    .SetApplicationName("Revix")
-    .PersistKeysToStackExchangeRedis(redisConnection, "DataProtection-Keys")
-    .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
 builder.Services.AddAuthentication(options =>
 {
@@ -140,13 +138,10 @@ app.Use(async (context, next) =>
 
 app.MapControllers();
 
-// ✅ Verify Data Protection keys in Redis
-var dpRedis = redisConnection.GetDatabase();
-var keysExist = await dpRedis.KeyExistsAsync("DataProtection-Keys");
-Console.WriteLine($"🔑 DataProtection-Keys in Redis: {keysExist}");
-
+// ✅ Redis stream setup — always run regardless of environment
 var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
 var redisDb = redis.GetDatabase();
+
 try
 {
     await redisDb.StreamCreateConsumerGroupAsync(
@@ -161,7 +156,7 @@ catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
     Console.WriteLine("ℹ️ Consumer group already exists.");
 }
 
-var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5001";
 app.Urls.Add($"http://0.0.0.0:{port}");
 
 app.Run();
