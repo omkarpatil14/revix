@@ -9,6 +9,7 @@ using Revix.Core.Constants;
 using Revix.Worker;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Security.Authentication;
+using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -61,6 +62,12 @@ var redisConnection = await ConnectionMultiplexer.ConnectAsync(redisOptions);
 Console.WriteLine($"✅ Redis connected: {redisConnection.IsConnected}");
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(redisConnection);
+
+// ✅ Persist DataProtection keys to Redis so they survive Render restarts
+builder.Services.AddDataProtection()
+    .SetApplicationName("Revix")
+    .PersistKeysToStackExchangeRedis(redisConnection, "DataProtection-Keys")
+    .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
 builder.Services.AddAuthentication(options =>
 {
@@ -156,7 +163,10 @@ catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
     Console.WriteLine("ℹ️ Consumer group already exists.");
 }
 
-var port = Environment.GetEnvironmentVariable("PORT") ?? "5001";
-app.Urls.Add($"http://0.0.0.0:{port}");
+if (!app.Environment.IsDevelopment())
+{
+    var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+    app.Urls.Add($"http://0.0.0.0:{port}");
+}
 
 app.Run();
