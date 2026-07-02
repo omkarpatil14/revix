@@ -34,5 +34,5 @@ jobs:
       - name: restore dependencies
         run: dotnet restore
       - name: test  
-        uses: dotnet test --configuration Release --verbosity normal
+        run: dotnet test --configuration Release --verbosity normal
       
