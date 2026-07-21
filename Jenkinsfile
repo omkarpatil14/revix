@@ -1,8 +1,9 @@
 pipeline {
     agent any
 
-    options {
-        timestamps()
+    environment {
+        IMAGE_NAME = 'omkarpatil13/revix'
+        IMAGE_TAG = '${BUILD_NUMBER}'
     }
 
     stages {
@@ -30,15 +31,39 @@ pipeline {
                 sh 'dotnet test revix.sln --configuration Release --no-build'
             }
          }
+         
+         stage('Build Docker Image'){
+            steps {
+                sh """
+                    docker build \
+                    -t ${IMAGE_NAME}:latest \
+                    -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                """
+            }
+         }
+
+         stage('Push Docker Image'){
+            steps {
+                withcredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                    sh """
+                        echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+                        docker push ${IMAGE_NAME}:latest
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+         }
+
+        
     }
 
     post {
         success {
-            echo 'Build Completed Successfully!'
+            echo 'pipeline Completed Successfully!'
         }
 
         failure {
-            echo 'Build Failed!'
+            echo 'pipeline Failed!'
         }
 
         always {
